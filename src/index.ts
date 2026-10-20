@@ -23,7 +23,10 @@
  * when the session settles.
  *
  * /steer <text> still uses pi's native steer (that is the point), with a
- * compaction fallback into the extension queue.
+ * compaction fallback into the extension queue. Slash commands also expose the
+ * queue choices directly: /queue <text> (deliver when the agent finishes) and
+ * /idlequeue <text> (deliver only when the agent AND all background jobs are
+ * idle) — both bypass the inline prompt, like /steer.
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -116,6 +119,19 @@ export default function steerExtension(pi: ExtensionAPI): void {
         }
         updateStatus();
         if (queue.length > 0) armFlush(800);
+    }
+
+    /** Park a message in the extension queue and arm delivery. */
+    function enqueue(text: string, mode: QueuedMessage["mode"], ctx: ExtensionContext): void {
+        queue.push({ text, mode, queuedAt: Date.now() });
+        updateStatus();
+        armFlush(300);
+        ctx.ui.notify(
+            mode === "waitidle"
+                ? `⏳ Queued until FULLY idle (agent + ${bgRunning} bg job(s) clear) — /unqueue to edit`
+                : "⏳ Queued — delivered when the agent finishes (/unqueue to edit)",
+            "info"
+        );
     }
 
     // ── bg-jobs awareness ─────────────────────────────────────────────────────
@@ -282,14 +298,40 @@ export default function steerExtension(pi: ExtensionAPI): void {
                 }
             }
             if (running || compacting) {
-                queue.push({ text: content, mode: "queue", queuedAt: Date.now() });
-                updateStatus();
-                armFlush(600);
-                ctx.ui.notify("⏳ Queued (busy/compacting) — delivered when settled", "info");
+                enqueue(content, "queue", ctx);
                 return;
             }
             pi.sendUserMessage(content);
             ctx.ui.notify("◀ Steered — triggering response", "info");
+        },
+    });
+
+    // ── /queue and /idlequeue — explicit queueing, bypasses the prompt ───────
+    pi.registerCommand("queue", {
+        description:
+            "agent-steer: queue a message for after the agent finishes (extension-owned queue, no Alt+Up widget). Usage: /queue <text>",
+        handler: async (args, ctx) => {
+            lastCtx = ctx;
+            const content = args?.trim();
+            if (!content) {
+                ctx.ui.notify("/queue <text>  — deliver after the agent fully finishes", "info");
+                return;
+            }
+            enqueue(content, "queue", ctx);
+        },
+    });
+
+    pi.registerCommand("idlequeue", {
+        description:
+            "agent-steer: queue a message until FULLY idle — no agent turn AND no background jobs running. Usage: /idlequeue <text>",
+        handler: async (args, ctx) => {
+            lastCtx = ctx;
+            const content = args?.trim();
+            if (!content) {
+                ctx.ui.notify("/idlequeue <text>  — deliver only when the agent and all bg jobs are idle", "info");
+                return;
+            }
+            enqueue(content, "waitidle", ctx);
         },
     });
 }

@@ -44,6 +44,8 @@ When the agent is **idle**, messages pass through normally — no prompt appears
 
 - `/steer <text>` — explicit steer, bypasses the prompt (falls back to the extension queue if the agent
   is busy mid-compaction)
+- `/queue <text>` — queue for delivery after the agent fully finishes (extension-owned; no Alt+Up widget)
+- `/idlequeue <text>` — queue until **fully** idle: agent finished *and* zero background jobs running
 - `/unqueue` — restore queued messages to the editor (the Alt+Up replacement)
 
 ## Install

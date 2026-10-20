@@ -4,6 +4,15 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.2.0
+
+### Added
+
+- `/queue <text>` — queue directly without the inline prompt (extension-owned queue;
+  delivered when the agent finishes)
+- `/idlequeue <text>` — queue until FULLY idle: agent done AND zero bg-jobs running
+  (listens on `bg-jobs:status`, like the `a` key choice)
+
 ## 0.1.0 — initial fork of @agnishc/edb-agent-steer
 
 ### Changed
