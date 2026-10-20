@@ -46,12 +46,14 @@ const BG_STATUS_EVENT = "bg-jobs:status";
 const BG_STATUS_REQUEST = "bg-jobs:status-request";
 
 interface SteerCfg {
-    /** Show the steer/queue prompt when the agent is idle but bg jobs run. */
+    /** Show the steer/queue prompt when the agent is idle but bg jobs run.
+     *  ON by default — this is the whole point of the extension; disable
+     *  with "agentSteer": { "promptWhenIdleWithBg": false }. */
     promptWhenIdleWithBg: boolean;
 }
 
 function loadSteerSettings(cwd: string): SteerCfg {
-    const cfg: SteerCfg = { promptWhenIdleWithBg: false };
+    const cfg: SteerCfg = { promptWhenIdleWithBg: true };
     const read = (p: string): Record<string, unknown> => {
         try {
             return JSON.parse(readFileSync(p, "utf8"));
@@ -74,7 +76,7 @@ export default function steerExtension(pi: ExtensionAPI): void {
     const queue: QueuedMessage[] = [];
     let bgRunning = 0;
     let compacting = false;
-    let cfg: SteerCfg = { promptWhenIdleWithBg: false };
+    let cfg: SteerCfg = { promptWhenIdleWithBg: true };
     let lastCtx: ExtensionContext | undefined;
     let flushTimer: NodeJS.Timeout | undefined;
 

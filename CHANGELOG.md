@@ -4,6 +4,14 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.3.1
+
+### Changed
+
+- `promptWhenIdleWithBg` now defaults to **true** (the prompt appears when the
+  agent is idle but background jobs are running). Opt out with
+  `"agentSteer": { "promptWhenIdleWithBg": false }`.
+
 ## 0.3.0
 
 ### Added
