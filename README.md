@@ -14,7 +14,7 @@ s steer   q queue   a queue when fully idle   d discard   e edit
 | --- | --- | --- |
 | `s` | steer | Delivers before the next LLM call (pi's native steer) |
 | `q` | queue | Delivers after the agent fully finishes |
-| `a` | queue when **fully** idle | Delivers only when the agent is idle **and** no background jobs are running (listens to `pi-bg-jobs` on the `bg-jobs:status` event bus — same mechanism `pi-ralph-loop` uses) |
+| `a` | queue when **fully** idle | Delivers only when the agent is idle **and** no background jobs are running — and holds a short grace window (`"agentSteer".jobDoneGrace`, default 1s) after the last job drains so pi-bg-jobs' own completion notice (with the job output) reaches the agent **first**; if that notice wakes the agent, delivery waits for the turn to settle too |
 | `d` | discard | Throws the message away |
 | `e` / Esc | edit | Restores the text to the editor |
 

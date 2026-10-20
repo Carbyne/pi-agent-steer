@@ -4,6 +4,14 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.3.3
+
+### Fixed
+
+- Flush loop is now self-healing: whenever items remain queued but delivery is
+  blocked (stale ctx, missed settle events, sparse-event harnesses), a watchdog
+  re-arms the flush instead of stranding items forever.
+
 ## 0.3.2
 
 ### Fixed

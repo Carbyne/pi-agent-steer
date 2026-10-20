@@ -147,7 +147,10 @@ export default function steerExtension(pi: ExtensionAPI): void {
             updateStatus();
             return;
         }
-        if (!lastCtx) return;
+        if (!lastCtx) {
+            if (queue.length > 0) armFlush(1500); // ctx may arrive on next event; watchdog
+            return;
+        }
         if (compacting) {
             armFlush(1000);
             return;
@@ -156,9 +159,16 @@ export default function steerExtension(pi: ExtensionAPI): void {
         try {
             ctxIdle = lastCtx.isIdle();
         } catch {
+            armFlush(1500); // stale ctx transient (switch/reload); keep trying
             return;
         }
-        if (!ctxIdle) return; // agent_settled / status events re-arm us
+        if (!ctxIdle) {
+            // Normally agent_settled / status events re-arm us; this watchdog
+            // only fires if those are missed (sparse-event harnesses, settle
+            // swallowed by a session switch), so queued items can strand.
+            armFlush(2000);
+            return;
+        }
         // waitidle items additionally require the post-drain grace window:
         // bg-jobs flips the status to running=0 IMMEDIATELY, but its actual
         // completion notice (carrying the job output the agent needs first)
