@@ -4,6 +4,20 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.3.4
+
+### Fixed
+
+- **Queued prompts no longer vanish while bg jobs run.** `pi.sendUserMessage`
+  returns a Promise — when a coalesced bg-jobs completion notice (or subagent
+  injection) started a turn between our `isIdle()` check and the send, the send
+  rejected asynchronously, the sync try/catch missed it, and the message was
+  silently dropped from the queue. Any send failure (sync throw OR async
+  rejection) now re-queues the item and retries with backoff; user input is
+  never lost. Added a `hasPendingMessages()` pre-check, throttled
+  "delivery blocked" warnings, and a regression test that rejects the send
+  exactly once mid-flush.
+
 ## 0.3.3
 
 ### Fixed

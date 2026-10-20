@@ -112,6 +112,7 @@ export default function steerExtension(pi: ExtensionAPI): void {
     let cfg: SteerCfg = { promptWhenIdleWithBg: true, jobDoneGraceMs: 1000 };
     let lastCtx: ExtensionContext | undefined;
     let flushTimer: NodeJS.Timeout | undefined;
+    let sendFailures = 0;
 
     const isCompactionError = (err: unknown): boolean => /compact/i.test(String(err));
 
@@ -169,6 +170,12 @@ export default function steerExtension(pi: ExtensionAPI): void {
             armFlush(2000);
             return;
         }
+        // Don't deliver while pi's own queue has pending messages — the send
+        // would race them (and pi may reject); re-check shortly.
+        if (typeof (lastCtx as any).hasPendingMessages === "function" && (lastCtx as any).hasPendingMessages()) {
+            armFlush(600);
+            return;
+        }
         // waitidle items additionally require the post-drain grace window:
         // bg-jobs flips the status to running=0 IMMEDIATELY, but its actual
         // completion notice (carrying the job output the agent needs first)
@@ -194,23 +201,48 @@ export default function steerExtension(pi: ExtensionAPI): void {
             return;
         }
         const [msg] = queue.splice(idx, 1);
+        // User input is NEVER lost: any send failure (sync throw or async
+        // rejection — pi.sendUserMessage returns a Promise) re-queues the
+        // item and retries with backoff. Silently dropping the message here
+        // was the "prompts vanish while bg jobs run" bug: a coalesced
+        // completion notice starting a turn between isIdle() and the send
+        // makes the send reject.
+        const requeue = (err: unknown): void => {
+            queue.unshift(msg);
+            if (isCompactionError(err)) compacting = true;
+            sendFailures++;
+            updateStatus();
+            if (sendFailures === 3 || sendFailures % 15 === 0) {
+                try {
+                    lastCtx?.ui.notify(
+                        `agent-steer: ${queue.length} message(s) still queued, delivery blocked (${sendFailures} attempts: ${String(err).slice(0, 120)})`,
+                        "warning"
+                    );
+                } catch {
+                    /* stale ctx */
+                }
+            }
+            armFlush(isCompactionError(err) ? 1000 : 1500);
+        };
         try {
             // Idle delivery triggers a fresh turn — and crucially never enters
             // pi's queue widget (no "Follow-up:" line, no Alt+Up hint).
-            pi.sendUserMessage(msg.text);
-        } catch (err) {
-            if (isCompactionError(err)) {
-                compacting = true;
-                queue.unshift(msg);
-                armFlush(1000);
+            const p = pi.sendUserMessage(msg.text) as unknown as Promise<void> | void;
+            if (p && typeof p.then === "function") {
+                p.then(
+                    () => {
+                        sendFailures = 0;
+                        if (queue.length > 0) armFlush(800);
+                    },
+                    (err) => requeue(err)
+                );
                 return;
             }
-            try {
-                lastCtx.ui.notify(`agent-steer: failed to deliver queued message: ${String(err)}`, "error");
-            } catch {
-                /* stale ctx */
-            }
+        } catch (err) {
+            requeue(err);
+            return;
         }
+        sendFailures = 0;
         updateStatus();
         if (queue.length > 0) armFlush(800);
     }
