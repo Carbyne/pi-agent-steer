@@ -4,6 +4,19 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.3.0
+
+### Added
+
+- Setting `"agentSteer": { "promptWhenIdleWithBg": true }` — shows the same
+  single-keypress prompt when the **agent is idle but background jobs are
+  running** (normally input just starts a turn immediately). In that state:
+  `s` **send now** (starts the turn alongside the jobs), `a` **hold until bg
+  idle** (parks in the extension queue, delivered when agent AND jobs are
+  clear), `d` discard, `e`/Esc edit. The prompt line relabels to match the
+  state (`agent idle · N bg job(s)`). Default off — input passes through
+  unchanged.
+
 ## 0.2.0
 
 ### Added

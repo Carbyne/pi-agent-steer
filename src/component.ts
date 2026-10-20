@@ -6,6 +6,8 @@ import type { SteerChoice } from "./types.ts";
 export interface PromptContext {
     compacting: boolean;
     bgRunning: number;
+    /** Agent idle but bg jobs running (promptWhenIdleWithBg): s/q send now, a holds. */
+    idleWithBg?: boolean;
 }
 
 export class SteerPromptComponent {
@@ -38,18 +40,25 @@ export class SteerPromptComponent {
 
         const state = this.ctx.compacting
             ? "compacting…"
-            : this.ctx.bgRunning > 0
-              ? `agent busy · ${this.ctx.bgRunning} bg job(s)`
-              : "agent busy";
+            : this.ctx.idleWithBg
+              ? `agent idle · ${this.ctx.bgRunning} bg job(s)`
+              : this.ctx.bgRunning > 0
+                ? `agent busy · ${this.ctx.bgRunning} bg job(s)`
+                : "agent busy";
 
         const lines: string[] = [
             "",
             truncateToWidth(`  ${th.fg("muted", "↵")}  ${th.fg("dim", `"${preview}"`)}  ${th.fg("muted", `(${state})`)}`, width),
             "",
-            truncateToWidth(
-                `  ${key("s", "steer")}   ${key("q", "queue")}   ${key("a", "queue when fully idle")}   ${key("d", "discard")}   ${key("e", "edit")}`,
-                width,
-            ),
+            this.ctx.idleWithBg
+                ? truncateToWidth(
+                      `  ${key("s", "send now")}   ${key("a", "hold until bg idle")}   ${key("d", "discard")}   ${key("e", "edit")}`,
+                      width,
+                  )
+                : truncateToWidth(
+                      `  ${key("s", "steer")}   ${key("q", "queue")}   ${key("a", "queue when fully idle")}   ${key("d", "discard")}   ${key("e", "edit")}`,
+                      width,
+                  ),
             "",
         ];
 

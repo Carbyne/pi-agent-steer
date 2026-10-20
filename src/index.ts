@@ -27,9 +27,17 @@
  * queue choices directly: /queue <text> (deliver when the agent finishes) and
  * /idlequeue <text> (deliver only when the agent AND all background jobs are
  * idle) — both bypass the inline prompt, like /steer.
+ *
+ * Setting "agentSteer": { "promptWhenIdleWithBg": true } additionally shows
+ * the same prompt when the AGENT IS IDLE BUT BACKGROUND JOBS ARE RUNNING
+ * (normally such input starts a turn immediately). In that state s/q send now
+ * and a holds delivery until the jobs drain.
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { SteerPromptComponent } from "./component.ts";
 import type { QueuedMessage, SteerChoice } from "./types.ts";
 
@@ -37,12 +45,36 @@ const STATUS_KEY = "agent-steer";
 const BG_STATUS_EVENT = "bg-jobs:status";
 const BG_STATUS_REQUEST = "bg-jobs:status-request";
 
+interface SteerCfg {
+    /** Show the steer/queue prompt when the agent is idle but bg jobs run. */
+    promptWhenIdleWithBg: boolean;
+}
+
+function loadSteerSettings(cwd: string): SteerCfg {
+    const cfg: SteerCfg = { promptWhenIdleWithBg: false };
+    const read = (p: string): Record<string, unknown> => {
+        try {
+            return JSON.parse(readFileSync(p, "utf8"));
+        } catch {
+            return {};
+        }
+    };
+    const merged = {
+        ...read(join(getAgentDir(), "settings.json")),
+        ...read(join(cwd, CONFIG_DIR_NAME, "settings.json")),
+    };
+    const s = (merged.agentSteer ?? {}) as Record<string, unknown>;
+    if (typeof s.promptWhenIdleWithBg === "boolean") cfg.promptWhenIdleWithBg = s.promptWhenIdleWithBg;
+    return cfg;
+}
+
 // ── Extension ──────────────────────────────────────────────────────────────────
 
 export default function steerExtension(pi: ExtensionAPI): void {
     const queue: QueuedMessage[] = [];
     let bgRunning = 0;
     let compacting = false;
+    let cfg: SteerCfg = { promptWhenIdleWithBg: false };
     let lastCtx: ExtensionContext | undefined;
     let flushTimer: NodeJS.Timeout | undefined;
 
@@ -150,6 +182,7 @@ export default function steerExtension(pi: ExtensionAPI): void {
     pi.on("session_start", async (_event, ctx) => {
         lastCtx = ctx;
         compacting = false;
+        cfg = loadSteerSettings(ctx.cwd);
         // Fresh snapshot in case jobs finished while we weren't listening.
         try {
             pi.events.emit(BG_STATUS_REQUEST, undefined);
@@ -192,17 +225,25 @@ export default function steerExtension(pi: ExtensionAPI): void {
 
         lastCtx = ctx;
 
-        // Agent idle and not compacting — pass through normally (no prompt).
-        if (ctx.isIdle() && !compacting) return { action: "continue" };
+        // Agent idle and not compacting — normally pass through (no prompt).
+        // Opt-in exception: prompt anyway when background jobs are running,
+        // so you can choose "hold until the jobs drain" instead of starting
+        // a turn that competes with them.
+        const agentIdle = ctx.isIdle();
+        if (agentIdle && !compacting && !(cfg.promptWhenIdleWithBg && bgRunning > 0)) {
+            return { action: "continue" };
+        }
 
         // No interactive UI (print / JSON mode) — pass through.
         if (!ctx.hasUI) return { action: "continue" };
+
+        const idleWithBg = agentIdle && !compacting;
 
         // Show the single-keypress prompt (steer stays selectable: while
         // compacting it is internally downgraded to queue, never an error).
         const choice = await ctx.ui.custom<SteerChoice>(
             (_tui, theme, _kb, done) =>
-                new SteerPromptComponent(event.text, theme, done, { compacting, bgRunning }),
+                new SteerPromptComponent(event.text, theme, done, { compacting, bgRunning, idleWithBg }),
         );
 
         // edit / Esc / unexpected null → restore text to editor, do nothing else.
@@ -213,6 +254,27 @@ export default function steerExtension(pi: ExtensionAPI): void {
 
         if (choice === "discard") {
             ctx.ui.notify("Message discarded", "info");
+            return { action: "handled" };
+        }
+
+        if (idleWithBg) {
+            // No turn is running: s/q start one immediately (bg jobs keep
+            // running alongside); a holds delivery until agent AND jobs idle.
+            if (choice === "waitidle") {
+                enqueue(event.text, "waitidle", ctx);
+                return { action: "handled" };
+            }
+            try {
+                pi.sendUserMessage(event.text);
+                ctx.ui.notify("◀ Sent — agent started; background jobs still running", "info");
+            } catch (err) {
+                if (isCompactionError(err)) {
+                    compacting = true;
+                    enqueue(event.text, "queue", ctx);
+                } else {
+                    ctx.ui.notify(`agent-steer: send failed: ${String(err)}`, "error");
+                }
+            }
             return { action: "handled" };
         }
 

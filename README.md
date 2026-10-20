@@ -18,7 +18,12 @@ s steer   q queue   a queue when fully idle   d discard   e edit
 | `d` | discard | Throws the message away |
 | `e` / Esc | edit | Restores the text to the editor |
 
-When the agent is **idle**, messages pass through normally — no prompt appears.
+When the agent is **idle**, messages pass through normally — no prompt appears —
+**unless** `"agentSteer": { "promptWhenIdleWithBg": true }` is set in `settings.json`:
+then submitting while background jobs are still running shows the same prompt, relabeled
+for the situation — `s` **send now**, `a` **hold until bg idle**, `d` discard, `e` edit. The
+`a` choice parks the message in the extension queue and delivers only when the agent *and*
+all jobs are idle.
 
 ## Why fork
 
