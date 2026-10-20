@@ -22,6 +22,14 @@
  * sendUserMessage — everything is parked in the extension queue and drained
  * when the session settles.
  *
+ * Ordering vs bg-jobs notices: waitidle deliveries hold for a grace window
+ * ("agentSteer".jobDoneGrace, default 1s) after bg jobs drain. bg-jobs flips
+ * its status event immediately on job completion but emits the actual
+ * completion notice (job output) after a coalescing delay — without the hold,
+ * queued prompts would jump ahead of the notice and the agent would answer
+ * without ever having seen the job result. If the notice wakes the agent,
+ * delivery additionally waits for the next settle.
+ *
  * /steer <text> still uses pi's native steer (that is the point), with a
  * compaction fallback into the extension queue. Slash commands also expose the
  * queue choices directly: /queue <text> (deliver when the agent finishes) and
@@ -50,10 +58,29 @@ interface SteerCfg {
      *  ON by default — this is the whole point of the extension; disable
      *  with "agentSteer": { "promptWhenIdleWithBg": false }. */
     promptWhenIdleWithBg: boolean;
+    /** Hold waitidle deliveries this long after bg jobs drain, so bg-jobs'
+     *  own completion notice (coalesced ~coalesceMs after the status flip)
+     *  reaches the agent FIRST. Same reasoning as ralph-loop's --job-grace. */
+    jobDoneGraceMs: number;
+}
+
+function parseDur(v: unknown): number | undefined {
+    if (typeof v === "number" && Number.isFinite(v) && v >= 0) return Math.floor(v * 1000);
+    if (typeof v === "string") {
+        const m = v.trim().match(/^(\d+(?:\.\d+)?)\s*(ms|s|m|h)?$/i);
+        if (m) {
+            const n = Number(m[1]);
+            const mul = ({ ms: 1, s: 1000, m: 60_000, h: 3_600_000 } as const)[
+                (m[2] ?? "s").toLowerCase() as "ms" | "s" | "m" | "h"
+            ];
+            return Math.floor(n * mul);
+        }
+    }
+    return undefined;
 }
 
 function loadSteerSettings(cwd: string): SteerCfg {
-    const cfg: SteerCfg = { promptWhenIdleWithBg: true };
+    const cfg: SteerCfg = { promptWhenIdleWithBg: true, jobDoneGraceMs: 1000 };
     const read = (p: string): Record<string, unknown> => {
         try {
             return JSON.parse(readFileSync(p, "utf8"));
@@ -67,6 +94,8 @@ function loadSteerSettings(cwd: string): SteerCfg {
     };
     const s = (merged.agentSteer ?? {}) as Record<string, unknown>;
     if (typeof s.promptWhenIdleWithBg === "boolean") cfg.promptWhenIdleWithBg = s.promptWhenIdleWithBg;
+    const grace = parseDur(s.jobDoneGrace);
+    if (grace !== undefined) cfg.jobDoneGraceMs = grace;
     return cfg;
 }
 
@@ -75,8 +104,12 @@ function loadSteerSettings(cwd: string): SteerCfg {
 export default function steerExtension(pi: ExtensionAPI): void {
     const queue: QueuedMessage[] = [];
     let bgRunning = 0;
+    /** Wall-clock of the most recent >0→0 bg-job transition; 0 = none since
+     *  startup. waitidle deliveries hold for cfg.jobDoneGraceMs after this so
+     *  bg-jobs' coalesced completion notice lands before our message. */
+    let lastBgDrainAt = 0;
     let compacting = false;
-    let cfg: SteerCfg = { promptWhenIdleWithBg: true };
+    let cfg: SteerCfg = { promptWhenIdleWithBg: true, jobDoneGraceMs: 1000 };
     let lastCtx: ExtensionContext | undefined;
     let flushTimer: NodeJS.Timeout | undefined;
 
@@ -126,11 +159,28 @@ export default function steerExtension(pi: ExtensionAPI): void {
             return;
         }
         if (!ctxIdle) return; // agent_settled / status events re-arm us
-        const idx = queue.findIndex(
-            (m) => m.mode === "queue" || (m.mode === "waitidle" && bgRunning === 0)
-        );
+        // waitidle items additionally require the post-drain grace window:
+        // bg-jobs flips the status to running=0 IMMEDIATELY, but its actual
+        // completion notice (carrying the job output the agent needs first)
+        // fires ~coalesceMs later. Delivering before that lets the user's
+        // prompt jump the notice — wrong order. If the notice wakes the agent
+        // instead, isIdle() turns false and we wait for the next settle.
+        const waitGrace = (): number => {
+            if (!lastBgDrainAt) return 0;
+            const remain = cfg.jobDoneGraceMs - (Date.now() - lastBgDrainAt);
+            return remain > 0 ? remain : 0;
+        };
+        const idx = queue.findIndex((m) => {
+            if (m.mode === "queue") return true;
+            if (m.mode !== "waitidle" || bgRunning !== 0) return false;
+            return waitGrace() === 0;
+        });
         if (idx === -1) {
             updateStatus();
+            // If the only blockers are waitidle items inside the grace window,
+            // re-arm precisely for the remainder.
+            const hasWaitIdle = queue.some((m) => m.mode === "waitidle" && bgRunning === 0);
+            if (hasWaitIdle) armFlush(waitGrace() + 60);
             return;
         }
         const [msg] = queue.splice(idx, 1);
@@ -172,9 +222,12 @@ export default function steerExtension(pi: ExtensionAPI): void {
     try {
         pi.events.on(BG_STATUS_EVENT, (s: unknown) => {
             const status = s as { running?: number } | undefined;
+            const prev = bgRunning;
             bgRunning = typeof status?.running === "number" ? status.running : 0;
+            if (bgRunning > 0) lastBgDrainAt = 0; // new job → grace clock resets on next drain
+            else if (prev > 0) lastBgDrainAt = Date.now(); // >0→0: start the grace window
             updateStatus();
-            if (bgRunning === 0 && queue.some((m) => m.mode === "waitidle")) armFlush(300);
+            if (bgRunning === 0 && queue.some((m) => m.mode === "waitidle")) armFlush(cfg.jobDoneGraceMs + 120);
         });
     } catch {
         /* event bus unavailable */
@@ -184,6 +237,7 @@ export default function steerExtension(pi: ExtensionAPI): void {
     pi.on("session_start", async (_event, ctx) => {
         lastCtx = ctx;
         compacting = false;
+        lastBgDrainAt = 0;
         cfg = loadSteerSettings(ctx.cwd);
         // Fresh snapshot in case jobs finished while we weren't listening.
         try {

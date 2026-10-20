@@ -40,7 +40,13 @@ all jobs are idle.
    A status line (`⏳ N queued — /unqueue`) shows while anything is pending, including
    `(waiting for bg jobs)` when `a`-items are held by running background jobs.
 
-2. **Compaction-safe.** pi rejects `sendUserMessage` while compaction is in progress
+2. **Notice-correct ordering with bg-jobs.** The `bg-jobs:status` event fires the
+   moment job counts change, but bg-jobs' completion *notice* (job output included) is
+   coalesced ~400 ms behind it. Delivering on the raw status flip would let your queued
+   prompt jump ahead of the agent seeing the job result — so waitidle items hold for
+   `jobDoneGrace` after the drain, exactly like `pi-ralph-loop`'s `--job-grace`.
+
+3. **Compaction-safe.** pi rejects `sendUserMessage` while compaction is in progress
    (`Cannot submit a prompt while compaction is in progress`). The original extension could surface that
    as an extension error. This fork tracks `session_before_compact` / `session_compact` /
    `session_compact_failed`, parks everything in the extension queue during compaction, and drains it

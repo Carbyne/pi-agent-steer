@@ -4,6 +4,20 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.3.2
+
+### Fixed
+
+- **waitidle ordering race with bg-jobs completion notices.** bg-jobs flips
+  `bg-jobs:status` to `running: 0` the instant a job exits, but its actual
+  completion notice (the message carrying the job output) is emitted ~400 ms
+  later via a coalescing timer. The old flush armed on the status event at
+  300 ms, so `a`/`/idlequeue` messages started their turn BEFORE the agent
+  ever saw the job result. waitidle deliveries now hold for a grace window
+  after the drain (`"agentSteer": { "jobDoneGrace": "1s" }`, default 1s —
+  same idea as ralph-loop's `--job-grace`); and if the notice wakes the agent
+  in the meantime, delivery additionally waits for the next settle.
+
 ## 0.3.1
 
 ### Changed
