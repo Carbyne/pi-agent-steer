@@ -1,0 +1,50 @@
+{
+  "name": "pi-agent-steer",
+  "version": "0.1.0",
+  "description": "Pi extension: mid-turn message prompt with steer / queue / queue-when-fully-idle / discard / edit — queueing is extension-owned, so no Alt+Up queued-message UI (broken on VSCode remote terminals on Windows). Fork of @agnishc/edb-agent-steer.",
+  "license": "MIT",
+  "type": "module",
+  "author": {
+    "name": "Carbyne",
+    "email": "15847393+Carbyne@users.noreply.github.com"
+  },
+  "homepage": "https://github.com/Carbyne/pi-agent-steer#readme",
+  "bugs": {
+    "url": "https://github.com/Carbyne/pi-agent-steer/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Carbyne/pi-agent-steer.git"
+  },
+  "keywords": [
+    "pi",
+    "pi-package",
+    "pi-extension",
+    "steer",
+    "queue"
+  ],
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.85.1",
+    "@earendil-works/pi-tui": "0.85.1",
+    "@types/node": "^25.9.5",
+    "typescript": "^5.9.0"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  }
+}
