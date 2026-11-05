@@ -75,8 +75,7 @@ Or in `~/.pi/agent/settings.json` under `packages`:
 ## Requirements
 
 - [pi](https://github.com/badlogic/pi-mono) ≥ 0.84
-- Optional: [pi-bg-jobs](https://github.com/Carbyne/pi-bg-jobs) — without it, `a` behaves like `q`
-  (no background jobs to wait for).
+- **Optional: [pi-bg-jobs](https://github.com/Carbyne/pi-bg-jobs)** — the `a` key, `/idlequeue`, and `promptWhenIdleWithBg` learn about running background jobs via the `bg-jobs:status` event bus. Without it there are no jobs to wait for, so `a` behaves like `q` and the idle-with-bg prompt never fires. pi-subagent background runs are visible here too (they adopt themselves as bg-jobs).
 
 ## License
 
