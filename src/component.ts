@@ -25,6 +25,7 @@ export class SteerPromptComponent {
         if (matchesKey(data, "s")) this.done("steer");
         else if (matchesKey(data, "q")) this.done("queue");
         else if (matchesKey(data, "a")) this.done("waitidle");
+        else if (matchesKey(data, "i")) this.done("interrupt");
         else if (matchesKey(data, "d")) this.done("discard");
         else if (matchesKey(data, "e") || matchesKey(data, "escape")) this.done("edit");
     }
@@ -56,7 +57,7 @@ export class SteerPromptComponent {
                       width,
                   )
                 : truncateToWidth(
-                      `  ${key("s", "steer")}   ${key("q", "queue")}   ${key("a", "queue when fully idle")}   ${key("d", "discard")}   ${key("e", "edit")}`,
+                      `  ${key("s", "steer")}   ${key("q", "queue")}   ${key("a", "queue when fully idle")}   ${key("i", "interrupt & send")}   ${key("d", "discard")}   ${key("e", "edit")}`,
                       width,
                   ),
             "",

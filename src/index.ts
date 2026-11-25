@@ -427,6 +427,24 @@ export default function steerExtension(pi: ExtensionAPI): void {
             return { action: "handled" };
         }
 
+        if (choice === "interrupt" && !compacting) {
+            // Interrupt & send: park the message in OUR never-lose queue
+            // FIRST, then abort the run. The aborted response keeps its
+            // streamed partial in context (verified end-to-end), the abort
+            // settles → agent_settled arms the flush → normal send starts
+            // the next turn with the model still aware of what it was mid-
+            // saying. Tools executing at abort time die mid-flight — same
+            // semantics as Ctrl+C.
+            enqueue(event.text, "queue", ctx);
+            try {
+                ctx.abort();
+            } catch {
+                /* not running — no-op; flush delivers anyway */
+            }
+            ctx.ui.notify("✂ Interrupted — response stopped; message will start the next turn", "info");
+            return { action: "handled" };
+        }
+
         if (choice === "steer" && !compacting) {
             // Held in OUR queue until the next tool boundary (flushSteer via
             // tool_result/turn_end) — recallable with /unqueue meanwhile.
@@ -469,6 +487,40 @@ export default function steerExtension(pi: ExtensionAPI): void {
             updateStatus();
             ctx.ui.setEditorText(text);
             ctx.ui.notify(`↩ Restored ${n} queued message(s) to the editor`, "info");
+        },
+    });
+
+    // ── /interrupt — explicit abort-and-send, bypasses the prompt ─────────────
+    pi.registerCommand("interrupt", {
+        description:
+            "agent-steer: abort the current response (its streamed partial stays in context) and send <text> as the next turn. Usage: /interrupt <text>",
+        handler: async (args, ctx) => {
+            lastCtx = ctx;
+            const content = args?.trim();
+            if (!content) {
+                ctx.ui.notify("/interrupt <text> — abort current response & send as the next turn", "info");
+                return;
+            }
+            if (ctx.isIdle() && !compacting) {
+                // Nothing to interrupt — plain send.
+                try {
+                    pi.sendUserMessage(content);
+                    return;
+                } catch {
+                    /* fall through to queue */
+                }
+            }
+            enqueue(content, "queue", ctx);
+            if (!compacting) {
+                try {
+                    ctx.abort();
+                } catch {
+                    /* no-op */
+                }
+                ctx.ui.notify("✂ Interrupted — message queued for the next turn", "info");
+            } else {
+                ctx.ui.notify("⏳ Compacting — queued (no abort attempted)", "info");
+            }
         },
     });
 

@@ -4,6 +4,23 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.3.6
+
+### Added
+
+- **`i` — interrupt & send.** A sixth choice on the steer prompt (and a
+  matching `/interrupt <text>` command): aborts the in-flight response via
+  `ctx.abort()` and delivers your message as the next turn. The message is
+  parked in the extension's never-lose queue BEFORE the abort, so it can
+  cannot vanish even if the settle event races; it then goes out as a normal
+  send the moment the aborted run settles. Verified end-to-end (random
+  model-invented codeword recall test) that pi keeps the aborted response's
+  streamed partial in the transcript AND sends it on the next call — the
+  model still knows what it had been saying, so `i` redirects rather than
+  destroys. Caveat identical to Ctrl+C: a tool executing at abort time dies
+  mid-flight. While compacting, `i` degrades gracefully to plain queueing
+  (no compaction abort attempted).
+
 ## 0.3.5
 
 ### Fixed / Changed

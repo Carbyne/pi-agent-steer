@@ -7,14 +7,15 @@ When you submit a message while the agent is already running, a compact inline p
 ```
 ↵ "your message here"  (agent busy · 2 bg job(s))
 
-s steer   q queue   a queue when fully idle   d discard   e edit
+s steer   q queue   a queue when fully idle   i interrupt & send   d discard   e edit
 ```
 
 | Key | Action | Behaviour |
 | --- | --- | --- |
-| `s` | steer | Delivers before the next LLM call (pi's native steer) |
+| `s` | steer | Handed to pi's native steer at the next tool boundary — held in our queue until then, so `/unqueue` can recall it |
 | `q` | queue | Delivers after the agent fully finishes |
 | `a` | queue when **fully** idle | Delivers only when the agent is idle **and** no background jobs are running — and holds a short grace window (`"agentSteer".jobDoneGrace`, default 1s) after the last job drains so pi-bg-jobs' own completion notice (with the job output) reaches the agent **first**; if that notice wakes the agent, delivery waits for the turn to settle too |
+| `i` | interrupt & send | Aborts the in-flight response via `ctx.abort()` and sends your message as the next turn — the aborted partial stays in context (the model still sees what it was mid-saying, verified by random-codeword recall); tools executing at abort time die mid-flight (same as Ctrl+C); during compaction degrades to `q` |
 | `d` | discard | Throws the message away |
 | `e` / Esc | edit | Restores the text to the editor |
 
@@ -54,8 +55,10 @@ all jobs are idle.
 
 ## Commands
 
-- `/steer <text>` — explicit steer, bypasses the prompt (falls back to the extension queue if the agent
-  is busy mid-compaction)
+- `/interrupt <text>` — abort the current response and send `<text>` as the next turn (partial kept in context; degrades to queueing during compaction)
+- `/steer <text>` — explicit steer, bypasses the prompt. Held in the extension queue until the
+  last safe moment (tool boundary) — fully recallable with `/unqueue` until handed to core;
+  falls back to normal queueing if compaction intervenes
 - `/queue <text>` — queue for delivery after the agent fully finishes (extension-owned; no Alt+Up widget)
 - `/idlequeue <text>` — queue until **fully** idle: agent finished *and* zero background jobs running
 - `/unqueue` — restore queued messages to the editor (the Alt+Up replacement)

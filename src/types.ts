@@ -1,6 +1,6 @@
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-export type SteerChoice = "steer" | "queue" | "waitidle" | "discard" | "edit";
+export type SteerChoice = "steer" | "queue" | "waitidle" | "interrupt" | "discard" | "edit";
 
 export interface QueuedMessage {
     text: string;
