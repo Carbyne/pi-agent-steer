@@ -188,7 +188,7 @@ export default function steerExtension(pi: ExtensionAPI): void {
             return remain > 0 ? remain : 0;
         };
         const idx = queue.findIndex((m) => {
-            if (m.mode === "queue") return true;
+            if (m.mode === "queue" || m.mode === "steer") return true;
             if (m.mode !== "waitidle" || bgRunning !== 0) return false;
             return waitGrace() === 0;
         });
@@ -247,6 +247,42 @@ export default function steerExtension(pi: ExtensionAPI): void {
         if (queue.length > 0) armFlush(800);
     }
 
+    /** Hand off armed steer items to core, just-in-time at a tool boundary.
+     *  Core consumes the steering queue after the current turn's tool calls,
+     *  before the next LLM call — we fire on every tool_result/turn_end, so
+     *  the insert lands in time; until that instant the item is OURS and
+     *  fully recallable via /unqueue. Any rejection re-queues for the next
+     *  boundary; compaction demotes to plain queue delivery at settle. */
+    function flushSteer(): void {
+        if (queue.length === 0) return;
+        let handed = false;
+        for (let i = 0; i < queue.length; ) {
+            if (queue[i].mode !== "steer") { i++; continue; }
+            const [msg] = queue.splice(i, 1);
+            handed = true;
+            const requeue = (err: unknown): void => {
+                if (isCompactionError(err)) {
+                    compacting = true;
+                    queue.unshift({ text: msg.text, mode: "queue", queuedAt: msg.queuedAt });
+                    armFlush(1000);
+                } else {
+                    queue.unshift(msg);
+                    armFlush(300); // retry at next boundary / watchdog
+                }
+                updateStatus();
+            };
+            try {
+                const p = pi.sendUserMessage(msg.text, { deliverAs: "steer" }) as unknown as Promise<void> | void;
+                if (p && typeof (p as Promise<void>).then === "function") {
+                    (p as Promise<void>).then(undefined, (err) => requeue(err));
+                }
+            } catch (err) {
+                requeue(err);
+            }
+        }
+        if (handed) updateStatus();
+    }
+
     /** Park a message in the extension queue and arm delivery. */
     function enqueue(text: string, mode: QueuedMessage["mode"], ctx: ExtensionContext): void {
         queue.push({ text, mode, queuedAt: Date.now() });
@@ -255,7 +291,9 @@ export default function steerExtension(pi: ExtensionAPI): void {
         ctx.ui.notify(
             mode === "waitidle"
                 ? `⏳ Queued until FULLY idle (agent + ${bgRunning} bg job(s) clear) — /unqueue to edit`
-                : "⏳ Queued — delivered when the agent finishes (/unqueue to edit)",
+                : mode === "steer"
+                  ? "⚡ Steer armed — handed to the agent at the next tool boundary (/unqueue to recall)"
+                  : "⏳ Queued — delivered when the agent finishes (/unqueue to edit)",
             "info"
         );
     }
@@ -296,7 +334,20 @@ export default function steerExtension(pi: ExtensionAPI): void {
 
     pi.on("agent_settled", async (_event, ctx) => {
         lastCtx = ctx;
+        // Steer items never consumed at a boundary (agent stopped outright)
+        // deliver as NORMAL sends here via flushOnce (steer included in its
+        // predicate) — re-steering at idle makes no sense.
         if (queue.length > 0) armFlush(250);
+    });
+
+    // Tool boundaries: the last-moment for a steer to still be consumed
+    // before the next LLM call — hand off armed items exactly here, never
+    // earlier, so /unqueue can recall them for as long as possible.
+    pi.on("tool_result", async () => {
+        flushSteer();
+    });
+    pi.on("turn_end", async () => {
+        flushSteer();
     });
 
     pi.on("session_before_compact", async () => {
@@ -377,20 +428,9 @@ export default function steerExtension(pi: ExtensionAPI): void {
         }
 
         if (choice === "steer" && !compacting) {
-            try {
-                pi.sendUserMessage(event.text, { deliverAs: "steer" });
-                ctx.ui.notify("◀ Steered — before the next LLM call", "info");
-            } catch (err) {
-                if (isCompactionError(err)) {
-                    compacting = true;
-                    queue.push({ text: event.text, mode: "queue", queuedAt: Date.now() });
-                    updateStatus();
-                    armFlush(1000);
-                    ctx.ui.notify("Compaction started mid-steer — message queued instead (/unqueue to edit)", "warning");
-                } else {
-                    ctx.ui.notify(`agent-steer: steer failed: ${String(err)}`, "error");
-                }
-            }
+            // Held in OUR queue until the next tool boundary (flushSteer via
+            // tool_result/turn_end) — recallable with /unqueue meanwhile.
+            enqueue(event.text, "steer", ctx);
             return { action: "handled" };
         }
 
@@ -444,18 +484,8 @@ export default function steerExtension(pi: ExtensionAPI): void {
             }
             const running = !ctx.isIdle();
             if (running && !compacting) {
-                try {
-                    pi.sendUserMessage(content, { deliverAs: "steer" });
-                    ctx.ui.notify("◀ Steered — before the next LLM call", "info");
-                    return;
-                } catch (err) {
-                    if (isCompactionError(err)) {
-                        compacting = true;
-                    } else {
-                        ctx.ui.notify(`agent-steer: steer failed: ${String(err)}`, "error");
-                        return;
-                    }
-                }
+                enqueue(content, "steer", ctx);
+                return;
             }
             if (running || compacting) {
                 enqueue(content, "queue", ctx);

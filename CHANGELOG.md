@@ -4,6 +4,25 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.3.5
+
+### Fixed / Changed
+
+- **Steered commands are now recallable (`/unqueue` works on them).**
+  Previously `s` / `/steer` handed the message to pi's core steering queue
+  immediately — after that the extension owned nothing: `/unqueue` couldn't
+  see or recall it, and the only core affordance (Alt+Up) is exactly the
+  broken one on Windows/VSCode remote terminals. Now armed steers live in the
+  extension-owned queue and are handed to core **just-in-time at the tool
+  boundary** (`tool_result`/`turn_end` triggers) — which is precisely when
+  core consumes the steering queue anyway (after the turn's tool calls,
+  before the next LLM call), so delivery semantics are unchanged while
+  cancel/recall (`/unqueue`, editor restore) works until that last moment.
+  Send rejections re-queue for the next boundary; compaction mid-flight
+  demotes to normal queued delivery at settle; steers still armed when the
+  agent settles go out as ordinary sends (re-steering an idle agent makes no
+  sense). Battery gains five T14-class T3 checks for the lifecycle.
+
 ## 0.3.4
 
 ### Fixed
